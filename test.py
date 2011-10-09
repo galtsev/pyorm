@@ -5,7 +5,7 @@ import psycopg2 as pg
 
 class Ticket(Model):
     _table_name = 'mm_ticket'
-    _key_prop = 'id'
+    _key = 'id'
     id = Property()
     status = Property(fieldname='state')
     subject = Property()
@@ -19,8 +19,13 @@ def run():
     session = pg_session.PgSession(con, 'gdv')
     #ticket = Ticket.get(con, 26)
     #print ticket
-    for r in Ticket.query(session).filter('subject like', 'test%').order('id').fetch(10):
-        print r
+    #for r in Ticket.query(session).filter('subject like', 'test%').order('-id').fetch(10):
+    #    print r
+    ticket = Ticket.get(session, 32)
+    print ticket
+    #ticket.subject = "updated subject"
+    ticket.delete()
+    con.commit()
 
 run()
 

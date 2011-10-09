@@ -1,4 +1,6 @@
 
+import copy
+
 class ORMError(Exception): pass
 class FilterError(ORMError): pass
 
@@ -12,22 +14,24 @@ class Property(object):
     def __get__(self, instance, owner):
         return instance.data[self.name]
     def __set__(self, instance, value):
-        instance[self.name] = value
+        if not hasattr(instance, 'old'):
+            instance.old = copy.copy(instance.data)
+        instance.data[self.name] = value
 
 class QueryIterator(object):
     def __init__(self, query, cur, props):
         self.query = query
         self.cur = cur
         self.props = props
-        #sql, params, self.props = query.get_sql()
-        #cur.execute(sql, params)
     def __iter__(self):
         return self
     def next(self):
         rec = self.cur.fetchone()
         if rec is None:
             raise StopIteration
-        return self.query.model(**dict(zip(self.props, rec)))
+        res = self.query.model(self.query.session, **dict(zip(self.props, rec)))
+        res._old_key = res.data[res._key]
+        return res
 
 class Query(object):
     def __init__(self, model_class, session):
@@ -100,29 +104,74 @@ class Query(object):
         return self
 
 class Model(object):
-    def __init__(self, **kwargs):
+    def __init__(self, session, **kwargs):
+        self.session = session
         self.data = kwargs
     @classmethod
     def tablename(cls):
         return cls._table_name
     @classmethod
+    def key_field(cls):
+        return cls._properties[cls._key].fieldname
+    @classmethod
     def get(cls, session, key):
         prop_list = cls._properties.keys()
         fields = ', '.join([cls._properties[p].fieldname for p in prop_list])
-        sql = 'select %s from $(schema).%s where %s=%%s' % (fields, cls.tablename(), cls._properties[cls._key_prop].fieldname)
+        sql = 'select %s from $(schema).%s where %s=%%s' % (fields, cls.tablename(), cls.key_field())
         sql = session.fix_sql(sql)
         cur = session.cursor()
         cur.execute(sql, (key,))
         rec = cur.fetchone()
-        return cls(**dict(zip(prop_list, rec)))
+        if rec:
+            res = cls(session, **dict(zip(prop_list, rec)))
+            res._old_key = res[cls._key]
+        else:
+            res = None
+        return res
     @classmethod
     def query(cls, session):
         return Query(cls, session)
+    def save(self):
+        prop_list = self._properties.keys()
+        if hasattr(self, '_old_key'):
+            # object already exist in db. update
+            if hasattr(self, 'old'):
+                # object properties modified
+                sql = ["update $(schema).%s set" % self.tablename()]
+                upd_fields = []
+                params = {}
+                for prop_name in prop_list:
+                    if self.data.get(prop_name) != self.old.get(prop_name):
+                        upd_fields.append("%s=%%(%s)s" % (self._properties[prop_name].fieldname, prop_name))
+                        params[prop_name] = self.data.get(prop_name)
+                if upd_fields:
+                    sql.append(",\n".join(upd_fields))
+                    sql.append("where %s=%%(old_key)s" % self.key_field())
+                    params['old_key'] = self._old_key
+                    sql = self.session.fix_sql('\n'.join(sql))
+                    self.session.cursor().execute(sql, params)
+                del self.old
+        else:
+            # new object. insert
+            fields = [self._properties[name].fieldname for name in prop_list]
+            params = dict([(name, self.data[name]) for name in prop_list])
+            sql = "insert into $(schema).%s (%s)\n  values (%s)" % (self.tablename(),
+                    ','.join(fields),
+                    ','.join(['%%(%s)s' % name for name in param_names]))
+            sql = self.session.fix_sql(sql)
+            self.session.cursor().execute(sql, params)
+        self._old_key = self[self._key]
+    def delete(self):
+        if self._old_key:
+            sql = self.session.fix_sql("delete from $(schema).%s where %s=%%s" % (self.tablename(), self.key_field()))
+            self.session.cursor().execute(sql, (self._old_key,))
+    def __getitem__(self, key):
+        return self.data[key]
     def __str__(self):
-        key_prop = self._key_prop
+        key_prop = self._key
         prop_names = self._properties.keys()
-        vals = ["%s:%s" % (name,repr(getattr(self, name))) for name in prop_names if name!=key_prop]
-        return "<Model %s: key(%s)=%s; %s>" % (self.__class__.__name__, self._key_prop, getattr(self, key_prop), '; '.join(vals))
+        vals = ["%s:%s" % (name,repr(getattr(self, name))) for name in prop_names if name!=self._key]
+        return "<Model %s: key(%s)=%s; %s>" % (self.__class__.__name__, self._key, self[self._key], '; '.join(vals))
 
 def init_model(cls):
     if not hasattr(cls, '_properties'):
