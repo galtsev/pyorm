@@ -6,4 +6,13 @@ class PgSession(object):
     def cursor(self):
         return self.con.cursor()
     def fix_sql(self, sql):
-        return sql.replace('$(schema)', self.schema)
+        schema = self.schema
+        if schema:
+            schema=schema+'.'
+        return sql.replace('$(schema).', schema)
+    def execute(self, sql, params):
+        cur = self.cursor()
+        cur.execute(self.fix_sql(sql), params)
+        return cur
+    def commit(self):
+        self.con.commit()

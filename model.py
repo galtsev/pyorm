@@ -5,14 +5,15 @@ class ORMError(Exception): pass
 class FilterError(ORMError): pass
 
 class Property(object):
-    def __init__(self, fieldname=None):
+    def __init__(self, fieldname=None, default=None):
         self.fieldname = fieldname
+        self.default = default
     def init_property(self, cls, name):
         self.name = name
         if not self.fieldname:
             self.fieldname = name
     def __get__(self, instance, owner):
-        return instance.data[self.name]
+        return instance.data.get(self.name, self.default)
     def __set__(self, instance, value):
         if not hasattr(instance, 'old'):
             instance.old = copy.copy(instance.data)
@@ -30,7 +31,7 @@ class QueryIterator(object):
         if rec is None:
             raise StopIteration
         res = self.query.model(self.query.session, **dict(zip(self.props, rec)))
-        res._old_key = res.data[res._key]
+        res.saved = True
         return res
 
 class Query(object):
@@ -39,19 +40,24 @@ class Query(object):
         self.session = session
         self.filters = []
         self._order = ''
-    def get_sql(self, limit=None, offset=None):
+    def get_sql(self, limit=None, offset=None, head=None):
         m = self.model
         props = m._properties.keys()
         fields = ', '.join([m._properties[p].fieldname for p in props])
-        sql = ['select', fields, 'from $(schema).'+m.tablename()]
+        if head:
+            sql = [head]
+        else:
+            sql = ['select %s from %s' % (fields, m._table_name)]
+        params = {}
         if self.filters:
             filters = []
             par_id = 1
-            params = {}
             for prop, value in self.filters:
                 arr = prop.strip().split(' ')
                 if len(arr) == 1:
                     prop_name, op = prop, '='
+                    if isinstance(value, list):
+                        op = 'in'
                 elif len(arr) == 2:
                     prop_name, op = arr
                 else:
@@ -81,102 +87,135 @@ class Query(object):
                 order.append('%s%s' % (m._properties[prop_name].fieldname, desc))
             sql.append( 'order by %s' % (', '.join(order)))
         if limit:
-            sql.append('limit %s' % limit)
+            sql.append('limit %d' % limit)
         if offset:
-            sql.append('offset %s' % offset)
-        sql = self.session.fix_sql('\n'.join(sql))
-        return sql, params, props
+            sql.append('offset %d' % offset)
+        return '\n'.join(sql), params, props
     def __iter__(self):
         sql, params, props = self.get_sql()
-        cur = self.session.cursor()
-        cur.execute(sql, params)
-        return QueryIterator(self, cur, props)
+        return QueryIterator(self, self.session.execute(sql, params), props)
     def fetch(self, limit, offset=0):
-        sql, params, props = self.get_sql(limit, offset)
-        cur = self.session.cursor()
-        cur.execute(sql, params)
-        return list(QueryIterator(self, cur, props))
+        sql, params, props = self.get_sql(limit=limit, offset=offset)
+        return list(QueryIterator(self, self.session.execute(sql, params), props))
+    def fetchone(self):
+        res = self.fetch(limit=1)
+        if res:
+            return res[0]
+        else:
+            return None
     def filter(self, prop, value):
         self.filters.append((prop, value))
         return self
     def order(self, fields):
         self._order = fields.strip()
         return self
+    def count(self):
+        sql, params, props = self.get_sql(head = 'select count(1) from '+self.model._table_name)
+        cur = self.session.execute(sql, params)
+        return cur.fetchone()[0]
+    def delete(self):
+        sql, params, props = self.get_sql(head = 'delete from '+self.model._table_name)
+        self.session.execute(sql, params)
+    def update(self, param_dict):
+        prop_list = param_dict.keys()
+        m = self.model
+        sql = []
+        params = {}
+        for p in prop_list:
+            param_name = 'par_' + p
+            sql.append("%s=%%(%s)s" % (m._properties[p].fieldname, param_name))
+            params[param_name] = param_dict[p]
+        head = 'update %s set\n' % m._table_name + ',\n'.join(sql) + '\n'
+        sql, select_params, props = self.get_sql(head = head)
+        params.update(select_params)
+        self.session.execute(sql, params)
 
 class Model(object):
     def __init__(self, session, **kwargs):
         self.session = session
         self.data = kwargs
+        self.saved = False
     @classmethod
-    def tablename(cls):
-        return cls._table_name
-    @classmethod
-    def key_field(cls):
-        return cls._properties[cls._key].fieldname
+    def build_pk_cond(cls, key_dict, params):
+        cond = []
+        for prop in cls._key.split(','):
+            field_name = cls._properties[prop].fieldname
+            params['pk_'+field_name] = key_dict[prop]
+            cond.append(field_name+'=%%(pk_%s)s' % field_name)
+        return ' and '.join(cond)
     @classmethod
     def get(cls, session, key):
         prop_list = cls._properties.keys()
         fields = ', '.join([cls._properties[p].fieldname for p in prop_list])
-        sql = 'select %s from $(schema).%s where %s=%%s' % (fields, cls.tablename(), cls.key_field())
-        sql = session.fix_sql(sql)
-        cur = session.cursor()
-        cur.execute(sql, (key,))
-        rec = cur.fetchone()
+        params = {}
+        if not isinstance(key, tuple):
+            key = (key,)
+        key_dict = dict(zip(cls._key.split(','),key))
+        sql = 'select %s from %s where %s' %(fields, cls._table_name, cls.build_pk_cond(key_dict, params))
+        rec = session.execute(sql, params).fetchone()
         if rec:
             res = cls(session, **dict(zip(prop_list, rec)))
-            res._old_key = res[cls._key]
+            res.saved = True
         else:
             res = None
         return res
     @classmethod
     def query(cls, session):
         return Query(cls, session)
+    def before_save(self):
+        pass
     def save(self):
+        self.before_save()
         prop_list = self._properties.keys()
-        if hasattr(self, '_old_key'):
+        #if hasattr(self, '_old_key'):
+        if self.saved:
             # object already exist in db. update
             if hasattr(self, 'old'):
                 # object properties modified
-                sql = ["update $(schema).%s set" % self.tablename()]
+                sql = ["update %s set" % self._table_name]
                 upd_fields = []
                 params = {}
                 for prop_name in prop_list:
                     if self.data.get(prop_name) != self.old.get(prop_name):
                         upd_fields.append("%s=%%(%s)s" % (self._properties[prop_name].fieldname, prop_name))
-                        params[prop_name] = self.data.get(prop_name)
+                        params[prop_name] = self[prop_name]
                 if upd_fields:
                     sql.append(",\n".join(upd_fields))
-                    sql.append("where %s=%%(old_key)s" % self.key_field())
-                    params['old_key'] = self._old_key
-                    sql = self.session.fix_sql('\n'.join(sql))
-                    self.session.cursor().execute(sql, params)
+                    sql.append("where")
+                    sql.append(self.build_pk_cond(self.old, params))
+                    self.session.execute('\n'.join(sql), params)
                 del self.old
         else:
             # new object. insert
             fields = [self._properties[name].fieldname for name in prop_list]
-            params = dict([(name, self.data[name]) for name in prop_list])
-            sql = "insert into $(schema).%s (%s)\n  values (%s)" % (self.tablename(),
+            params = dict([(name, self[name]) for name in prop_list])
+            sql = "insert into %s (%s)\n  values (%s)" % (self._table_name,
                     ','.join(fields),
-                    ','.join(['%%(%s)s' % name for name in param_names]))
-            sql = self.session.fix_sql(sql)
-            self.session.cursor().execute(sql, params)
-        self._old_key = self[self._key]
+                    ','.join(['%%(%s)s' % name for name in prop_list]))
+            self.session.execute(sql, params)
+        self.saved = True
+    def cancel(self):
+        if hasattr(self, 'old'):
+            self.data = self.old
+            del self.old
     def delete(self):
-        if self._old_key:
-            sql = self.session.fix_sql("delete from $(schema).%s where %s=%%s" % (self.tablename(), self.key_field()))
-            self.session.cursor().execute(sql, (self._old_key,))
+        if self.saved:
+            params = {}
+            sql = "delete from %s where %s" % (self._table_name, self.build_pk_cond(self.data, params))
+            self.session.execute(sql, params)
     def __getitem__(self, key):
-        return self.data[key]
+        return getattr(self, key)
     def __str__(self):
         key_prop = self._key
         prop_names = self._properties.keys()
         vals = ["%s:%s" % (name,repr(getattr(self, name))) for name in prop_names if name!=self._key]
         return "<Model %s: key(%s)=%s; %s>" % (self.__class__.__name__, self._key, self[self._key], '; '.join(vals))
 
-def init_model(cls):
-    if not hasattr(cls, '_properties'):
-        cls._properties = {}
-    for prop_name, prop in cls.__dict__.iteritems():
-        if not prop_name.startswith('__') and isinstance(prop, Property):
-            prop.init_property(cls, prop_name)
-            cls._properties[prop_name] = prop
+def init_models(*classes):
+    for cls in classes:
+        if not hasattr(cls, '_properties'):
+            cls._properties = {}
+        for prop_name, prop in cls.__dict__.iteritems():
+            if not prop_name.startswith('__') and isinstance(prop, Property):
+                prop.init_property(cls, prop_name)
+                cls._properties[prop_name] = prop
