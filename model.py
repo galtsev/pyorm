@@ -35,14 +35,15 @@ class QueryIterator(object):
         return res
 
 class Query(object):
-    def __init__(self, model_class, session):
+    def __init__(self, model_class, session, props):
         self.model = model_class
         self.session = session
         self.filters = []
         self._order = ''
+        self.props = props and props.split(',') or []
     def get_sql(self, limit=None, offset=None, head=None):
         m = self.model
-        props = m._properties.keys()
+        props = self.props or m._properties.keys()
         fields = ', '.join([m._properties[p].fieldname for p in props])
         if head:
             sql = [head]
@@ -160,8 +161,8 @@ class Model(object):
             res = None
         return res
     @classmethod
-    def query(cls, session):
-        return Query(cls, session)
+    def query(cls, session, props=''):
+        return Query(cls, session, props)
     def before_save(self):
         pass
     def save(self):
