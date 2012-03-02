@@ -1,7 +1,7 @@
 
 import psycopg2 as pg
 import psycopg2.extensions
-from model import Model, Property, init_models
+from model import Model, Property
 from pg_datasource import DataSet
 import unittest
 import psycopg2.extensions as ex
@@ -19,6 +19,13 @@ def create_schema(schemaname):
         full_name text,
         email text,
         department text
+    );
+    create table sss.agent(
+        username text,
+        full_name text,
+        email text,
+        department text,
+        position text
     );
     create table sss.tt_group(
         groupname text
@@ -41,6 +48,8 @@ def create_schema(schemaname):
     insert into sss.user(username, full_name, email, department) values ('usr2', 'user 2', 'usr2@example.com', 'a');
     insert into sss.user(username, full_name, email, department) values ('usr3', 'user 3', 'usr3@example.com', 'a');
     insert into sss.user(username, full_name, email, department) values ('usr4', 'user 4', 'usr4@example.com', 'b');
+    insert into sss.agent(username, full_name, email, department, position) values ('dir', 'Director', 'dir@example.com', 'b', 'director');
+    insert into sss.agent(username, full_name, email, department, position) values ('manager', 'Manager', 'manager@example.com', 'b', 'manager');
     insert into sss.group_member(username, groupname) values ('usr1', 'gr1');
     insert into sss.group_member(username, groupname) values ('usr2', 'gr1');
     insert into sss.group_member(username, groupname) values ('usr3', 'gr1');
@@ -68,6 +77,11 @@ class User(Model):
     full_name = Property()
     email = Property()
     department = Property()
+
+# check model inheritance
+class Agent(User):
+    _table_name = '$(schema).agent'
+    position = Property()
 
 class Group(Model):
     _key = 'groupname'
@@ -105,11 +119,6 @@ class TicketUser(Model):
     @classmethod
     def get_from(cls):
         return """from $(schema).ticket t join $(schema).user u on (t.assigned=u.username)"""
-
-class MegaTicket(Ticket):
-    foo = Property()
-
-#init_models(User, Group, GroupMember, Ticket, TicketUser)
 
 class TestDataSet(DataSet):
     def gen_id(self, gen_name):
@@ -258,10 +267,14 @@ class AllTests(unittest.TestCase):
         ticket = TicketUser.query(ds).filter(id=1).fetchone()
         self.assert_(ticket.username == u'usr1')
         self.assert_(ticket.full_name == u'user 1')
+    def testModelInheritance(self):
+        ds = self.dsa
+        dir = Agent.get(ds, 'dir')
+        self.assert_(dir.full_name == u'Director')
+        self.assert_(dir.position == u'director')
+        self.assert_(Agent.query(ds).filter(position='manager').count() == 1)
 
 if __name__ == "__main__":
     #unittest.main()
-    for t in (User, Group, GroupMember):
-        print t._properties
     suite = unittest.makeSuite(AllTests)
     unittest.TextTestRunner(verbosity=2).run(suite)

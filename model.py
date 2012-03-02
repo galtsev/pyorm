@@ -37,7 +37,6 @@ class ModelMetaclass(type):
 
 class Model(object):
     __metaclass__ = ModelMetaclass
-    __allow_access_to_unprotected_subobjects__=1
     _default_props = None
     def __init__(self, session, **kwargs):
         self.session = session
@@ -83,13 +82,5 @@ class Model(object):
         key_prop = self._key
         prop_names = self._properties.keys()
         vals = ["%s:%s" % (name,repr(getattr(self, name))) for name in prop_names if name!=self._key]
-        return "<Model %s: key(%s)=%s; %s>" % (self.__class__.__name__, self._key, self[self._key], '; '.join(vals))
+        return "<%s: key(%s)=%s; %s>" % (self.__class__.__name__, self._key, self[self._key], '; '.join(vals))
 
-def init_models(*classes):
-    for cls in classes:
-        if not hasattr(cls, '_properties'):
-            cls._properties = {}
-        for prop_name, prop in cls.__dict__.iteritems():
-            if not prop_name.startswith('__') and isinstance(prop, Property):
-                prop.init_property(cls, prop_name)
-                cls._properties[prop_name] = prop
