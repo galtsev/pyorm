@@ -2,7 +2,7 @@
 import psycopg2 as pg
 import psycopg2.extensions
 from model import Model, Property, init_models
-from pg_session import PgSession
+from pg_datasource import DataSet
 import unittest
 import psycopg2.extensions as ex
 
@@ -89,15 +89,29 @@ class Ticket(Model):
     assigned = Property()
     date_opened = Property()
     priority = Property(default=3)
+    v_state = Property(fieldname='lower(state)', virtual=True)
     def before_save(self):
         if self.state not in ('Open', 'Hold', 'Spam'):
             raise VerifyError("Wrong status: %s" % self.state)
         if self.id is None:
             self.id = self.session.gen_id('gen_ticket_id')
 
-init_models(User, Group, GroupMember, Ticket)
+# composite query
+class TicketUser(Model):
+    id = Property()
+    state = Property(fieldname='t.state')
+    username = Property()
+    full_name = Property()
+    @classmethod
+    def get_from(cls):
+        return """from $(schema).ticket t join $(schema).user u on (t.assigned=u.username)"""
 
-class DataSet(PgSession):
+class MegaTicket(Ticket):
+    foo = Property()
+
+#init_models(User, Group, GroupMember, Ticket, TicketUser)
+
+class TestDataSet(DataSet):
     def gen_id(self, gen_name):
         sql = "select nextval('%s.%s')" % (self.schema, gen_name)
         cur = self.execute(sql, {})
@@ -112,8 +126,8 @@ class AllTests(unittest.TestCase):
         cur.execute(create_schema('ormb'))
         cur.execute(orma_add('orma'))
         con.commit()
-        self.dsa = DataSet(con, 'orma')
-        self.dsb = DataSet(con, 'ormb')
+        self.dsa = TestDataSet(con, 'orma')
+        self.dsb = TestDataSet(con, 'ormb')
     def tearDown(self):
         cur = self.con.cursor()
         cur.execute('drop schema orma cascade')
@@ -139,7 +153,7 @@ class AllTests(unittest.TestCase):
         none_member = GroupMember.get(ds, ('usr3', 'gr2'))
         self.assert_(none_member is None)
         # check access to separate schemas
-        dsb = PgSession(self.con, 'ormb')
+        dsb = TestDataSet(self.con, 'ormb')
         self.assert_(User.get(ds, 'usra'))
         self.assert_(User.get(dsb, 'usra') is None)
     def testQuery(self):
@@ -229,8 +243,25 @@ class AllTests(unittest.TestCase):
         closed = [t.id for t in Ticket.query(ds).filter('state', 'Closed')]
         self.assert_(set(open).issubset(set(closed)))
         self.assert_(Ticket.get(ds, open[0]).state == 'Closed')
+    def testRawFilter(self):
+        ds = self.dsa
+        self.assert_(Ticket.query(ds).raw_filter('lower(state)=%(r1)s', dict(r1='open')).count() == 3)
+    def testVirtualField(self):
+        ds = self.dsa
+        ticket = Ticket.get(ds, 1)
+        self.assert_(ticket.v_state is None)
+        self.assert_(ticket)
+        self.assert_('v_state' not in ticket.data)
+        self.assert_(Ticket.query(ds).filter(v_state='open').count() == 3)
+    def testJoin(self):
+        ds = self.dsa
+        ticket = TicketUser.query(ds).filter(id=1).fetchone()
+        self.assert_(ticket.username == u'usr1')
+        self.assert_(ticket.full_name == u'user 1')
 
 if __name__ == "__main__":
     #unittest.main()
+    for t in (User, Group, GroupMember):
+        print t._properties
     suite = unittest.makeSuite(AllTests)
     unittest.TextTestRunner(verbosity=2).run(suite)
