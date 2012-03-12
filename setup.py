@@ -8,6 +8,5 @@ setup(
         author = 'Denis Galtsev',
         author_email = 'galtsev@logicalware.com',
         packages = ['pyorm'],
-        package_dir = {'': 'src'}
      )
 
