@@ -29,9 +29,13 @@ def make_cond_1(ind, fn):
     return cmp
 
 def make_cond_2(ind, op, val):
+    fn = cmp_map[op]
     def cmp(rec):
-        return cmp_map[op](rec[ind], val)
+        return fn(rec[ind], val)
     return cmp
+
+def desc(a, b):
+    return cmp(b,a)
 
 class QueryIterator(object):
     def __init__(self, query):
@@ -97,8 +101,47 @@ class Query(object):
             if not cond(rec):
                 return False
             return True
+    def get_rec_list(self):
+        return [r for r in self.table.itervalues() if self.check(r)]
     def __iter__(self):
-        return QueryIterator(self)
+        #return QueryIterator(self)
+        props = [(p,i) for i, p in enumerate(self.table.props) if p in self.props]
+        def map_fnc(rec):
+            res = self.model_cls(self.ds, **dict((p, rec[i]) for p,i in props))
+            res.saved = True
+            return res
+        l = map(map_fnc, self.get_rec_list())
+        if self._order:
+            l.sort(cmp = self._order)
+        return l
+    def order(self, props):
+        props = props.split(',').strip()
+        sort_list = []
+        for p in props:
+            if p.startswith('-'):
+                sort_list.append((p[1:], desc))
+            else:
+                sort_list.append((p, cmp))
+        def cmp_fnc(a,b):
+            for p, fn in sort_list:
+                r = fn(a[p],b[p])
+                if r:
+                    return r
+            return r
+        self._order = cmp_fnc
+    def count(self):
+        return len(self.get_rec_list())
+    def delele(self):
+        map(self.ds.delete, self)
+    def fetch(self, limit, offset=0):
+        return list(self.__iter__())[offset, limit+offset]
+    def fetchone(self):
+        try:
+            return self.__iter__().next()
+        except StopIteration:
+            return None
+
+
 
 class Table(object):
     def __init__(self, name, key, props):
