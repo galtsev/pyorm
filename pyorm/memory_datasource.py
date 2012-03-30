@@ -37,23 +37,6 @@ def make_cond_2(ind, op, val):
 def desc(a, b):
     return cmp(b,a)
 
-class QueryIterator(object):
-    def __init__(self, query):
-        self.query = query
-        self.cur = query.table.data.itervalues()
-        self.props = [(p,i) for i, p in enumerate(query.table.props) if p in query.props]
-    def __iter__(self):
-        return self
-    def next(self):
-        rec = self.cur.next()
-        while rec and not self.query.check(rec):
-            rec = self.cur.next()
-        if rec is None:
-            raise StopIteration()
-        res = self.query.model_cls(self.query.ds, **dict((p, rec[i]) for p,i in self.props))
-        res.saved = True
-        return res
-
 class Query(object):
     def __init__(self, model_cls, ds, props):
         self.model_cls = model_cls
@@ -104,7 +87,6 @@ class Query(object):
     def get_rec_list(self):
         return [r for r in self.table.data.itervalues() if self.check(r)]
     def __iter__(self):
-        #return QueryIterator(self)
         props = [(p,i) for i, p in enumerate(self.table.props) if p in self.props]
         def map_fnc(rec):
             res = self.model_cls(self.ds, **dict((p, rec[i]) for p,i in props))
@@ -216,5 +198,4 @@ class DataSet(object):
             del table.data[key]
     def query(self, model_class, props):
         return Query(model_class, self, props)
-
 

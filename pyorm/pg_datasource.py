@@ -1,3 +1,4 @@
+from model import FilterError
 
 class QueryIterator(object):
     def __init__(self, query, cur):
