@@ -100,9 +100,9 @@ class Query(object):
         for cond in self.conditions:
             if not cond(rec):
                 return False
-            return True
+        return True
     def get_rec_list(self):
-        return [r for r in self.table.itervalues() if self.check(r)]
+        return [r for r in self.table.data.itervalues() if self.check(r)]
     def __iter__(self):
         #return QueryIterator(self)
         props = [(p,i) for i, p in enumerate(self.table.props) if p in self.props]
@@ -113,9 +113,9 @@ class Query(object):
         l = map(map_fnc, self.get_rec_list())
         if self._order:
             l.sort(cmp = self._order)
-        return l
+        return l.__iter__()
     def order(self, props):
-        props = props.split(',').strip()
+        props = [p.strip() for p in props.split(',')]
         sort_list = []
         for p in props:
             if p.startswith('-'):
@@ -129,9 +129,10 @@ class Query(object):
                     return r
             return r
         self._order = cmp_fnc
+        return self
     def count(self):
         return len(self.get_rec_list())
-    def delele(self):
+    def delete(self):
         map(self.ds.delete, self)
     def fetch(self, limit, offset=0):
         return list(self.__iter__())[offset, limit+offset]
@@ -140,8 +141,11 @@ class Query(object):
             return self.__iter__().next()
         except StopIteration:
             return None
-
-
+    def update(self, param_dict):
+        for row in self:
+            for k, v in param_dict.items():
+                row[k] = v
+            row.save()
 
 class Table(object):
     def __init__(self, name, key, props):
@@ -151,7 +155,7 @@ class Table(object):
         self.data = {}
 
 class DataSet(object):
-    def __init__(self, filename):
+    def __init__(self, filename=''):
         self.filename = filename
         self.load(filename)
     def load(self, filename):

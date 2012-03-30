@@ -1,4 +1,5 @@
 
+from datetime import datetime
 from pyorm.model import Model, Property
 import unittest
 
@@ -37,12 +38,11 @@ class Ticket(Model):
     assigned = Property()
     date_opened = Property()
     priority = Property(default=3)
-    v_state = Property(fieldname='lower(state)', virtual=True)
     def before_save(self):
-        if self.state not in ('Open', 'Hold', 'Spam'):
+        if self.state not in ('Open', 'Hold', 'Spam', 'Closed'):
             raise VerifyError("Wrong status: %s" % self.state)
         if self.id is None:
-            self.id = self.session.gen_id('gen_ticket_id')
+            self.id = self.ds.gen_id('gen_ticket_id')
 
 def populate_dataset(ds):
     groups = [ 'gr1','gr2' ]
@@ -50,29 +50,37 @@ def populate_dataset(ds):
         Group(ds, groupname=group).save()
 
     users = [
-                dict(username='usr1',full_name='user 1', email = 'usr1@example.com', department='a'),
-                dict(username='usr2',full_name='user 2', email = 'usr2@example.com', department='a'),
-                dict(username='usr3',full_name='user 3', email = 'usr3@example.com', department='a'),
-                dict(username='usr4',full_name='user 4', email = 'usr4@example.com', department='b'),
+                dict(username=u'usr1',full_name=u'user 1', email = u'usr1@example.com', department=u'a'),
+                dict(username=u'usr2',full_name=u'user 2', email = u'usr2@example.com', department=u'a'),
+                dict(username=u'usr3',full_name=u'user 3', email = u'usr3@example.com', department=u'a'),
+                dict(username=u'usr4',full_name=u'user 4', email = u'usr4@example.com', department=u'b'),
             ]
     for user in users:
         User(ds, **user).save()
 
     agents = [
-                dict(username='dir',full_name='Director', email = 'dir@example.com', department='b', position = 'director'),
-                dict(username='manager',full_name='Manager', email = 'manager@example.com', department='b', position = 'manager'),
+                dict(username=u'dir',full_name=u'Director', email = u'dir@example.com', department=u'b', position = u'director'),
+                dict(username=u'manager',full_name=u'Manager', email = u'manager@example.com', department=u'b', position = u'manager'),
              ]
     for agent in agents:
         Agent(ds, **agent).save()
 
     group_members = {
-                        'gr1': ['usr1','usr1','usr3'],
-                        'gr2': ['usr1','usr4']
+                        'gr1': [u'usr1',u'usr1',u'usr3'],
+                        'gr2': [u'usr1',u'usr4']
                     }
     for gr, members in group_members.items():
         for username in members:
             GroupMember(ds, groupname=gr, username = username).save()
 
+    tickets = [
+                dict(id=1, state=u'Open', subject=u'foo', assigned=u'usr1', date_opened = datetime(2011,10,2,12,01), priority=3),
+                dict(id=2, state=u'Open', subject=u'subj a', assigned=u'usr1', date_opened = datetime(2011,10,3,12,01), priority=3),
+                dict(id=3, state=u'Open', subject=u'subj b', assigned=u'usr2', date_opened = datetime(2011,10,2,12,01), priority=5),
+                dict(id=4, state=u'Hold', subject=u'subj c', assigned=u'usr2', date_opened = datetime(2011,10,4,12,01), priority=3),
+              ]
+    for ticket in tickets:
+        Ticket(ds, **ticket).save()
 
 class BaseTests(unittest.TestCase):
     def populate_dataset(self, ds):
@@ -89,15 +97,11 @@ class BaseTests(unittest.TestCase):
         self.assertEqual(member.username, 'usr1')
         none_member = GroupMember.get(ds, ('usr3', 'gr2'))
         self.assert_(none_member is None)
-        # check access to separate schemas
-        dsb = self.dsb
-        self.assert_(User.get(ds, 'usra'))
-        self.assert_(User.get(dsb, 'usra') is None)
     def testQuery(self):
         ds = self.dsa
         # test order desc
         usernames = [u.username for u in User.query(ds).order('-username')]
-        self.assertEqual(usernames, 'usra usr4 usr3 usr2 usr1'.split(' '))
+        self.assertEqual(usernames, 'usr4 usr3 usr2 usr1'.split(' '))
         # test filter
         users = [u.username for u in User.query(ds).filter('department', 'a')]
         users.sort()
@@ -109,27 +113,27 @@ class BaseTests(unittest.TestCase):
         self.assert_(User.query(ds).filter('username', 'newuser1').count() == 1)
     def testUpdate(self):
         ds = self.dsa
-        user = User.get(ds, 'usra')
-        self.assert_(user.email == 'usra@example.com')
+        user = User.get(ds, 'usr1')
+        self.assert_(user.email == 'usr1@example.com')
         user.email = 'updated@email.address'
         # original record in database is not changed yet, and can be retrieved 
-        self.assert_(User.get(ds, 'usra').email == 'usra@example.com')
+        self.assert_(User.get(ds, 'usr1').email == 'usr1@example.com')
         user.save()
         self.assert_(user.email == 'updated@email.address')
-        self.assert_(User.get(ds, 'usra').email == 'updated@email.address')
+        self.assert_(User.get(ds, 'usr1').email == 'updated@email.address')
         cnt = 0
         for ticket in Ticket.query(ds).filter('assigned', 'usr1'):
-            ticket.assigned = 'usra'
+            ticket.assigned = 'usr2'
             ticket.save()
             cnt += 1
         self.assert_(cnt == 2)
-        self.assert_(Ticket.query(ds).filter('assigned', 'usra').count() == 4)
-        self.assert_(Ticket.get(ds, 2).assigned == 'usra')
+        self.assert_(Ticket.query(ds).filter('assigned', 'usr2').count() == 4)
+        self.assert_(Ticket.get(ds, 2).assigned == 'usr2')
     def testDeleteModel(self):
         ds = self.dsa
         Ticket.get(ds, 2).delete()
         self.assert_(Ticket.get(ds, 2) is None)
-        self.con.commit()
+        ds.commit()
         self.assert_(Ticket.get(ds, 2) is None)
     def testDeleteQuery(self):
         ds = self.dsa
@@ -180,13 +184,6 @@ class BaseTests(unittest.TestCase):
         closed = [t.id for t in Ticket.query(ds).filter('state', 'Closed')]
         self.assert_(set(open).issubset(set(closed)))
         self.assert_(Ticket.get(ds, open[0]).state == 'Closed')
-    def testVirtualField(self):
-        ds = self.dsa
-        ticket = Ticket.get(ds, 1)
-        self.assert_(ticket.v_state is None)
-        self.assert_(ticket)
-        self.assert_('v_state' not in ticket.data)
-        self.assert_(Ticket.query(ds).filter(v_state='open').count() == 3)
     def testModelInheritance(self):
         ds = self.dsa
         dir = Agent.get(ds, 'dir')
