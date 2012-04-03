@@ -106,6 +106,10 @@ class BaseTests(unittest.TestCase):
         users = [u.username for u in User.query(ds).filter('department', 'a')]
         users.sort()
         self.assertEqual(users, 'usr1 usr2 usr3'.split())
+    def testCount(self):
+        ds = self.dsa
+        # count must ignore .order()
+        self.assertEqual(Ticket.query(ds).order('-id').count(), 4)
     def testInsert(self):
         ds = self.dsa
         user = User(ds, username='newuser1', full_name = 'new user 1', email='newuser1@example.com', department='a')

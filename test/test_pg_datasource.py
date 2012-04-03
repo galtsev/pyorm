@@ -54,10 +54,15 @@ class AllTests(test_base.BaseTests):
         con = self.con = pg.connect("dbname=pyorm_test")
         con.set_client_encoding('utf8')
         self.dsa = TestDataSet(con, 'orma')
-        self.dsa.execute(create_schema('orma'))
-        self.populate_dataset(self.dsa)
-        self.dsa.commit()
+        ds = self.dsa
+        if ds.execute('select 1 from pg_namespace where nspname=%s', ('orma',)).fetchone():
+            ds.execute('drop schema orma cascade')
+            ds.commit()
+        ds.execute(create_schema('orma'))
+        self.populate_dataset(ds)
+        ds.commit()
     def tearDown(self):
+        self.con.commit()
         cur = self.con.cursor()
         cur.execute('drop schema orma cascade')
         self.con.commit()

@@ -65,14 +65,14 @@ class Query(object):
             self.par_id += 1
             self.params[par_name] = value
             self.conditions.append("%s %s %%(%s)s" % (fld, op, par_name))
-    def get_sql(self, limit=None, offset=None, head=None):
+    def get_sql(self, limit=None, offset=None, head=None, ignore_order=False):
         m = self.model
         fields = ', '.join([m._properties[p].fieldname for p in self.props])
         sql = [head or 'select ' + fields]
         sql.append(self._from)
         if self.conditions:
             sql.append( 'where %s' % ' and '.join(self.conditions))
-        if self._order:
+        if self._order and not ignore_order:
             sql.append( 'order by %s' % (', '.join(self._order)))
         if limit:
             sql.append('limit %d' % limit)
@@ -102,9 +102,9 @@ class Query(object):
         self._order = [fields]
         return self
     def count(self):
-        return self.session.execute(self.get_sql(head = 'select count(1)'), self.params).fetchone()[0]
+        return self.session.execute(self.get_sql(head = 'select count(1)', ignore_order=True), self.params).fetchone()[0]
     def delete(self):
-        self.session.execute(self.get_sql(head = 'delete'), self.params)
+        self.session.execute(self.get_sql(head = 'delete', ignore_order=True), self.params)
     def update(self, param_dict):
         prop_list = param_dict.keys()
         m = self.model
