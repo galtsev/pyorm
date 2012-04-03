@@ -98,6 +98,9 @@ class Query(object):
                 prop_name = prop_name[1:]
             self._order.append('%s%s' % (self.model._properties[prop_name].fieldname, desc))
         return self
+    def raw_order(self, fields):
+        self._order = [fields]
+        return self
     def count(self):
         return self.session.execute(self.get_sql(head = 'select count(1)'), self.params).fetchone()[0]
     def delete(self):

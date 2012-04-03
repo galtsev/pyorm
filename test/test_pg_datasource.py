@@ -62,3 +62,11 @@ class AllTests(test_base.BaseTests):
         cur.execute('drop schema orma cascade')
         self.con.commit()
         self.con.close()
+    def testRawOrder(self):
+        ds = self.dsa
+        ticket_ids = [t.id for t in test_base.Ticket.query(ds).raw_order('lower(subject)')]
+        self.assert_(ticket_ids == [1,2,3,4])
+    def testRawFilter(self):
+        ds = self.dsa
+        ticket = test_base.Ticket.query(ds).raw_filter('lower(subject)=%(subject)s', {'subject': 'subj a'}).fetchone()
+        self.assert_(ticket.id == 2)

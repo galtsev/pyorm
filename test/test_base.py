@@ -75,9 +75,9 @@ def populate_dataset(ds):
 
     tickets = [
                 dict(id=1, state=u'Open', subject=u'foo', assigned=u'usr1', date_opened = datetime(2011,10,2,12,01), priority=3),
-                dict(id=2, state=u'Open', subject=u'subj a', assigned=u'usr1', date_opened = datetime(2011,10,3,12,01), priority=3),
+                dict(id=2, state=u'Open', subject=u'Subj a', assigned=u'usr1', date_opened = datetime(2011,10,3,12,01), priority=3),
                 dict(id=3, state=u'Open', subject=u'subj b', assigned=u'usr2', date_opened = datetime(2011,10,2,12,01), priority=5),
-                dict(id=4, state=u'Hold', subject=u'subj c', assigned=u'usr2', date_opened = datetime(2011,10,4,12,01), priority=3),
+                dict(id=4, state=u'Hold', subject=u'Subj c', assigned=u'usr2', date_opened = datetime(2011,10,4,12,01), priority=3),
               ]
     for ticket in tickets:
         Ticket(ds, **ticket).save()
